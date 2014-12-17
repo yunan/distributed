@@ -89,7 +89,7 @@ func TestBasic(t *testing.T) {
 		kvh[i] = port("basic", i)
 	}
 	for i := 0; i < nservers; i++ {
-		sma[i] = StartServer(kvh, i)
+		sma[i] = StartServer(kvh, i, "", false)
 	}
 
 	ck := MakeClerk(kvh)
@@ -298,7 +298,7 @@ func TestUnreliable(t *testing.T) {
 		kvh[i] = port("unrel", i)
 	}
 	for i := 0; i < nservers; i++ {
-		sma[i] = StartServer(kvh, i)
+		sma[i] = StartServer(kvh, i, "", false)
 		// don't turn on unreliable because the assignment
 		// doesn't require the shardmaster to detect duplicate
 		// client requests.
@@ -349,7 +349,7 @@ func TestFreshQuery(t *testing.T) {
 		kvh[i] = port("fresh", i)
 	}
 	for i := 0; i < nservers; i++ {
-		sma[i] = StartServer(kvh, i)
+		sma[i] = StartServer(kvh, i, "", false)
 	}
 
 	ck1 := MakeClerk([]string{kvh[1]})

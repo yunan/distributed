@@ -25,7 +25,6 @@ const (
 	SMJoin  = "Join"
 	SMMove  = "Move"
 	SMQuery = "Query"
-	persist = true
 	Network = false
 )
 
@@ -45,6 +44,8 @@ type ShardMaster struct {
 	dbLock         sync.Mutex
 	dbReadOptions  *levigo.ReadOptions
 	dbWriteOptions *levigo.WriteOptions
+
+	persist bool
 }
 
 type Op struct {
@@ -73,7 +74,7 @@ func (sm *ShardMaster) reblance() {
 */
 
 func (sm *ShardMaster) WriteConf(confignum int) {
-	if !persist {
+	if !sm.persist {
 		return
 	}
 	sm.dbLock.Lock()
@@ -97,7 +98,7 @@ func (sm *ShardMaster) WriteConf(confignum int) {
 }
 
 func (sm *ShardMaster) GetConf(confignum int) {
-	if persist {
+	if sm.persist {
 		//fmt.Println("get_config_", confignum)
 		sm.dbLock.Lock()
 		defer sm.dbLock.Unlock()
@@ -124,7 +125,7 @@ func (sm *ShardMaster) GetConf(confignum int) {
 }
 
 func (sm *ShardMaster) WriteString(key string, val int) {
-	if !persist {
+	if !sm.persist {
 		return
 	}
 	sm.dbLock.Lock()
@@ -146,7 +147,7 @@ func (sm *ShardMaster) WriteString(key string, val int) {
 }
 
 func (sm *ShardMaster) GetString(key string) int {
-	if !persist {
+	if !sm.persist {
 		return 0
 	}
 	sm.dbLock.Lock()
@@ -171,8 +172,8 @@ func (sm *ShardMaster) GetString(key string) int {
 	return 0
 }
 
-func (sm *ShardMaster) dbinit() {
-	if !persist {
+func (sm *ShardMaster) dbinit(dbsuffix string) {
+	if !sm.persist {
 		return
 	}
 	sm.dbLock.Lock()
@@ -188,7 +189,7 @@ func (sm *ShardMaster) dbinit() {
 	options := levigo.NewOptions()
 	options.SetCache(levigo.NewLRUCache(3 << 30))
 	options.SetCreateIfMissing(true)
-	dbname := "./shardmasterdb" + strconv.Itoa(sm.me)
+	dbname := "./shardmasterdb" + dbsuffix
 	os.RemoveAll(dbname) // for test,
 	var err error
 	sm.db, err = levigo.Open(dbname, options)
@@ -416,7 +417,7 @@ func (sm *ShardMaster) Kill() {
 	sm.dead = true
 	sm.l.Close()
 	sm.px.Kill()
-	if persist {
+	if sm.persist {
 		sm.dbLock.Lock()
 		sm.db.Close()
 		sm.dbReadOptions.Close()
@@ -431,7 +432,7 @@ func (sm *ShardMaster) Kill() {
 // form the fault-tolerant shardmaster service.
 // me is the index of the current server in servers[].
 //
-func StartServer(servers []string, me int) *ShardMaster {
+func StartServer(servers []string, me int, dbsuffix string, persist bool) *ShardMaster {
 	gob.Register(Op{})
 
 	sm := new(ShardMaster)
@@ -446,8 +447,10 @@ func StartServer(servers []string, me int) *ShardMaster {
 	rpcs := rpc.NewServer()
 	rpcs.Register(sm)
 
-	sm.px = paxos.Make(servers, me, rpcs)
-	sm.dbinit()
+	sm.px = paxos.Make(servers, me, rpcs, dbsuffix, persist)
+
+	sm.persist = persist
+	sm.dbinit(dbsuffix)
 
 	var l net.Listener
 	var e error

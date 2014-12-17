@@ -57,7 +57,7 @@ func setup(tag string, unreliable bool) ([]string, []int64, [][]string, [][]*Sha
 		smh[i] = port(tag+"m", i)
 	}
 	for i := 0; i < nmasters; i++ {
-		sma[i] = shardmaster.StartServer(smh, i)
+		sma[i] = shardmaster.StartServer(smh, i, "", false)
 	}
 
 	const ngroups = 3                 // replica groups
@@ -74,7 +74,7 @@ func setup(tag string, unreliable bool) ([]string, []int64, [][]string, [][]*Sha
 			ha[i][j] = port(tag+"s", (i*nreplicas)+j)
 		}
 		for j := 0; j < nreplicas; j++ {
-			sa[i][j] = StartServer(gids[i], smh, ha[i], j)
+			sa[i][j] = StartServer(gids[i], smh, ha[i], j, "", false)
 			sa[i][j].unreliable = unreliable
 		}
 	}

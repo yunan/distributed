@@ -54,6 +54,8 @@ type Paxos struct {
 	dbLock         sync.Mutex
 	dbReadOptions  *levigo.ReadOptions
 	dbWriteOptions *levigo.WriteOptions
+
+	persist bool
 }
 
 type instances struct {
@@ -91,8 +93,7 @@ type DecisionArg struct {
 const (
 	OK      = "OK"
 	REJECT  = "REJECT"
-	persist = true
-	NetWork = false
+	Network = false
 )
 
 type PaxosReply struct {
@@ -120,7 +121,7 @@ type PaxosReply struct {
 func call(srv string, name string, args interface{}, reply interface{}) bool {
 	var c *rpc.Client
 	var err error
-	if NetWork {
+	if Network {
 		c, err = rpc.Dial("tcp", srv)
 	} else {
 		c, err = rpc.Dial("unix", srv)
@@ -191,7 +192,7 @@ func (px *Paxos) makeins(seq int) {
 }
 
 func (px *Paxos) getins(seq int) {
-	if persist {
+	if px.persist {
 		//fmt.Println("getins")
 		px.dbLock.Lock()
 		defer px.dbLock.Unlock()
@@ -225,7 +226,7 @@ func (px *Paxos) getins(seq int) {
 }
 
 func (px *Paxos) writeins(seq int) {
-	if !persist {
+	if !px.persist {
 		return
 	}
 	//fmt.Println("writeins")
@@ -250,7 +251,7 @@ func (px *Paxos) writeins(seq int) {
 }
 
 func (px *Paxos) writedone() {
-	if !persist {
+	if !px.persist {
 		return
 	}
 	px.dbLock.Lock()
@@ -273,7 +274,7 @@ func (px *Paxos) writedone() {
 }
 
 func (px *Paxos) getdone() {
-	if !persist {
+	if !px.persist {
 		return
 	}
 	px.dbLock.Lock()
@@ -305,7 +306,7 @@ func (px *Paxos) getdone() {
 
 func (px *Paxos) delete(seq int) {
 	delete(px.ins, seq)
-	if !persist {
+	if !px.persist {
 		return
 	}
 	px.dbLock.Lock()
@@ -321,8 +322,8 @@ func (px *Paxos) delete(seq int) {
 	}
 }
 
-func (px *Paxos) dbinit() {
-	if !persist {
+func (px *Paxos) dbinit(dbsuffix string) {
+	if !px.persist {
 		return
 	}
 	px.dbLock.Lock()
@@ -339,7 +340,7 @@ func (px *Paxos) dbinit() {
 	options := levigo.NewOptions()
 	options.SetCache(levigo.NewLRUCache(3 << 30))
 	options.SetCreateIfMissing(true)
-	dbname := "./paxosdb" + strconv.Itoa(rand.Int())
+	dbname := "./paxosdb" + dbsuffix
 	os.RemoveAll(dbname) //for test
 	var err error
 	px.db, err = levigo.Open(dbname, options)
@@ -617,7 +618,7 @@ func (px *Paxos) Kill() {
 	if px.l != nil {
 		px.l.Close()
 	}
-	if persist {
+	if px.persist {
 		px.dbLock.Lock()
 		px.db.Close()
 		px.dbReadOptions.Close()
@@ -631,7 +632,7 @@ func (px *Paxos) Kill() {
 // the ports of all the paxos peers (including this one)
 // are in peers[]. this servers port is peers[me].
 //
-func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
+func Make(peers []string, me int, rpcs *rpc.Server, dbsuffix string, persist bool) *Paxos {
 	px := &Paxos{}
 	px.peers = peers
 	px.me = me
@@ -642,7 +643,9 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 	for k, _ := range px.done {
 		px.done[k] = -1
 	}
-	px.dbinit()
+	px.persist = persist
+	px.dbinit(dbsuffix)
+
 	if rpcs != nil {
 		// caller will create socket &c
 		rpcs.Register(px)
@@ -655,7 +658,7 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 		os.Remove(peers[me]) // only needed for "unix"
 		var l net.Listener
 		var e error
-		if NetWork {
+		if Network {
 			l, e = net.Listen("tcp", peers[me])
 			if e != nil {
 				log.Fatal("listen error: ", e)

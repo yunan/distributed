@@ -36,8 +36,7 @@ const (
 	OpGet      = "Get"
 	OpReconfig = "reconfig"
 	OpGetshard = "getshard"
-	persist    = true
-	NetWork    = false
+	Network    = false
 )
 
 const (
@@ -81,10 +80,12 @@ type ShardKV struct {
 	dbLock         sync.Mutex
 	dbReadOptions  *levigo.ReadOptions
 	dbWriteOptions *levigo.WriteOptions
+
+	persist bool
 }
 
 func (kv *ShardKV) WriteConfig() {
-	if !persist {
+	if !kv.persist {
 		return
 	}
 	kv.dbLock.Lock()
@@ -105,7 +106,7 @@ func (kv *ShardKV) WriteConfig() {
 }
 
 func (kv *ShardKV) GetConfig() {
-	if persist {
+	if kv.persist {
 		//fmt.Println("get_config_", confignum)
 		kv.dbLock.Lock()
 		defer kv.dbLock.Unlock()
@@ -130,7 +131,7 @@ func (kv *ShardKV) GetConfig() {
 }
 
 func (kv *ShardKV) WriteKV(key string, val string) {
-	if !persist {
+	if !kv.persist {
 		return
 	}
 	kv.dbLock.Lock()
@@ -151,7 +152,7 @@ func (kv *ShardKV) WriteKV(key string, val string) {
 }
 
 func (kv *ShardKV) GetKV(key string) (string, Err) {
-	if !persist {
+	if !kv.persist {
 		return "", FAIL
 	}
 	kv.dbLock.Lock()
@@ -177,7 +178,7 @@ func (kv *ShardKV) GetKV(key string) (string, Err) {
 }
 
 func (kv *ShardKV) GetKey(key string) (string, bool) {
-	if persist {
+	if kv.persist {
 		val, err := kv.GetKV("key_" + key)
 		if err == OK {
 			kv.kv[key] = val
@@ -188,7 +189,7 @@ func (kv *ShardKV) GetKey(key string) (string, bool) {
 }
 
 func (kv *ShardKV) GetSeen(key string) {
-	if persist {
+	if kv.persist {
 		val, err := kv.GetKV("seen_" + key)
 		if err == OK {
 			kv.seen[key], _ = strconv.Atoi(val)
@@ -203,7 +204,7 @@ func (kv *ShardKV) WriteSeen(client string) {
 }
 
 func (kv *ShardKV) IterKey(shard int) {
-	if !persist {
+	if !kv.persist {
 		return
 	}
 	iterator := kv.db.NewIterator(kv.dbReadOptions)
@@ -237,7 +238,7 @@ func (kv *ShardKV) IterKey(shard int) {
 }
 
 func (kv *ShardKV) IterSeen() {
-	if !persist {
+	if !kv.persist {
 		return
 	}
 	iterator := kv.db.NewIterator(kv.dbReadOptions)
@@ -267,8 +268,8 @@ func (kv *ShardKV) IterSeen() {
 	iterator.Close()
 }
 
-func (kv *ShardKV) dbinit() {
-	if !persist {
+func (kv *ShardKV) dbinit(dbsuffix string) {
+	if !kv.persist {
 		return
 	}
 	kv.dbLock.Lock()
@@ -285,7 +286,7 @@ func (kv *ShardKV) dbinit() {
 	options.SetCache(levigo.NewLRUCache(3 << 30))
 	options.SetCreateIfMissing(true)
 	//dbname := "./shardkvdb" + strconv.Itoa(kv.me)
-	dbname := "./shardkvdb" + strconv.Itoa(rand.Int())
+	dbname := "./shardkvdb" + dbsuffix
 	os.RemoveAll(dbname) // for test,
 	var err error
 	kv.db, err = levigo.Open(dbname, options)
@@ -417,7 +418,7 @@ func (kv *ShardKV) kill() {
 // Me is the index of this server in servers[].
 //
 func StartServer(gid int64, shardmasters []string,
-	servers []string, me int) *ShardKV {
+	servers []string, me int, dbsuffix string, persist bool) *ShardKV {
 	gob.Register(Op{})
 
 	kv := new(ShardKV)
@@ -433,15 +434,16 @@ func StartServer(gid int64, shardmasters []string,
 	kv.config = shardmaster.Config{Num: -1}
 	kv.process = 0
 
-	kv.dbinit()
+	kv.persist = persist
+	kv.dbinit(dbsuffix)
 
 	rpcs := rpc.NewServer()
 	rpcs.Register(kv)
 
-	kv.px = paxos.Make(servers, me, rpcs)
+	kv.px = paxos.Make(servers, me, rpcs, dbsuffix, persist)
 	var l net.Listener
 	var e error
-	if NetWork {
+	if Network {
 		l, e = net.Listen("tcp", servers[me])
 		if e != nil {
 			log.Fatal("listen error: ", e)
