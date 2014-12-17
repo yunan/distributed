@@ -1,2 +1,3 @@
 paxos*
+!paxos.go
 log
